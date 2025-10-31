@@ -1,0 +1,107 @@
+name: Code Review
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  review:
+    name: Lint, Test, Audit & CodeQL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        id: lint
+        continue-on-error: true
+        run: |
+          set +e
+          npm run lint
+          rc=$?
+          echo "status=$rc" >> $GITHUB_OUTPUT
+          if [ $rc -ne 0 ]; then echo "message=Lint failed" >> $GITHUB_OUTPUT; fi
+
+      - name: Run tests
+        id: test
+        continue-on-error: true
+        run: |
+          set +e
+          npm test --silent
+          rc=$?
+          echo "status=$rc" >> $GITHUB_OUTPUT
+          if [ $rc -ne 0 ]; then echo "message=Tests failed" >> $GITHUB_OUTPUT; fi
+
+      - name: Run npm audit
+        id: audit
+        continue-on-error: true
+        run: |
+          set +e
+          npm audit --audit-level=moderate || true
+          rc=$?
+          echo "status=$rc" >> $GITHUB_OUTPUT
+          if [ $rc -ne 0 ]; then echo "message=Vulnerabilities found" >> $GITHUB_OUTPUT; fi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript
+
+      - name: Build for CodeQL
+        uses: github/codeql-action/autobuild@v2
+        id: codeql-build
+        continue-on-error: true
+
+      - name: Analyze with CodeQL
+        id: codeql-analyze
+        uses: github/codeql-action/analyze@v2
+        continue-on-error: true
+
+      - name: Comment on PR with summary
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const lintStatus = steps.lint.outputs.status || '0';
+            const testStatus = steps.test.outputs.status || '0';
+            const auditStatus = steps.audit.outputs.status || '0';
+            const codeqlBuildFailed = steps['codeql-build']?.conclusion !== 'success';
+            const codeqlAnalyzeFailed = steps['codeql-analyze']?.conclusion !== 'success';
+            let body = `### Automated code review results\n`;
+            body += `- Lint: ${lintStatus === '0' ? '✅ passed' : '❌ failed (see checks)'}\n`;
+            body += `- Tests: ${testStatus === '0' ? '✅ passed' : '❌ failed (see checks)'}\n`;
+            body += `- Vulnerability scan (npm audit): ${auditStatus === '0' ? '✅ passed' : '❌ issues found'}\n`;
+            body += `- CodeQL build: ${codeqlBuildFailed ? '⚠️ issue during build' : '✅ OK'}\n`;
+            body += `- CodeQL analyze: ${codeqlAnalyzeFailed ? '⚠️ issue during analysis' : '✅ OK'}\n`;
+            if (!pr) {
+              console.log('No PR context, skipping comment');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body
+              });
+            }
+
+      - name: Fail job if issues found
+        if: always()
+        run: |
+          lint=${{ steps.lint.outputs.status }}
+          test=${{ steps.test.outputs.status }}
+          audit=${{ steps.audit.outputs.status }}
+          if [ "${lint:-0}" != "0" ] || [ "${test:-0}" != "0" ] || [ "${audit:-0}" != "0" ]; then
+            echo "One or more checks failed (lint/test/audit). Failing job to block merge.";
+            exit 1
+          fi

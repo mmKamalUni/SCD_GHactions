@@ -1,0 +1,59 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (optional)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build documentation (mkdocs, npm, or copy)
+        id: build_docs
+        run: |
+          set -e
+          BUILD_DIR=site
+          # Prefer npm build script if present
+          if [ -f package.json ] && grep -q "\"docs:build\"" package.json; then
+            echo "Found npm docs:build script — running it"
+            npm ci
+            npm run docs:build
+            # allow build script to place output in site or dist
+            if [ -d site ]; then BUILD_DIR=site; elif [ -d dist ]; then BUILD_DIR=dist; fi
+          elif [ -f mkdocs.yml ]; then
+            echo "Found mkdocs.yml — using mkdocs to build"
+            python -m pip install --user mkdocs
+            python -m pip install --user mkdocs-material || true
+            mkdocs build -d site
+            BUILD_DIR=site
+          else
+            echo "No build script detected — copying markdown from docs/ to site/"
+            mkdir -p site
+            cp -R docs/* site/ || true
+            BUILD_DIR=site
+          fi
+          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: ${{ env.BUILD_DIR }}
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1

@@ -1,0 +1,47 @@
+name: Scheduled Scrape
+
+# Runs daily at midnight Asia/Karachi (UTC+5). Midnight PKT = 19:00 UTC previous day.
+on:
+  schedule:
+    - cron: '0 19 * * *'
+
+jobs:
+  scheduled-scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper (invoke run.runScrape)
+        id: run_scrape
+        run: |
+          set -e
+          echo "Starting scheduled scrape"
+          node -e "(async ()=>{ try{ const res = await require('./run').runScrape(); console.log('SCRAPE_SUCCESS'); console.log(JSON.stringify(res)); }catch(e){ console.error('SCRAPE_ERROR', e); process.exit(2);} })()" > scrape_output.log 2>&1 || true
+          echo "--- SCRAPE OUTPUT ---"
+          tail -n +1 scrape_output.log
+
+      - name: Send notification email with results
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Scheduled scrape result — ${{ github.repository }}"
+          body: |
+            Scheduled scrape completed for commit ${{ github.sha }}.
+            See attached scrape_output.log for details.
+          to: ${{ secrets.MAIL_TO }}
+          from: ${{ secrets.MAIL_FROM }}
+          secure: true
+          attachments: scrape_output.log

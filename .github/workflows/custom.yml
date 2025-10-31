@@ -1,0 +1,63 @@
+name: Generate Release Notes and Create Release
+
+on:
+  push:
+    tags:
+      - 'release/*'
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git fetch --prune --unshallow || true
+
+      - name: Determine tags and range
+        id: vars
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "Tag=$TAG"
+          # get previous tag (by date). If none, use empty
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p' || true)
+          echo "PrevTag=$PREV_TAG"
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$TAG"
+          else
+            RANGE="$PREV_TAG..$TAG"
+          fi
+          echo "RANGE=$RANGE" >> $GITHUB_OUTPUT
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p' || true)
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$TAG"
+          else
+            RANGE="$PREV_TAG..$TAG"
+          fi
+          echo "Generating changelog for range: $RANGE"
+          # Create a simple markdown changelog from commit messages
+          HEADER="# Release $TAG\n\n"
+          BODY=$(git log --pretty=format:'- %s (%an)' $RANGE || echo "- No commit data available")
+          echo -e "$HEADER$BODY" > release_notes.md
+          echo "Generated release_notes.md"
+          echo "changelog_path=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub release with notes
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG }}
+          name: ${{ steps.vars.outputs.TAG }}
+          body_path: release_notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
