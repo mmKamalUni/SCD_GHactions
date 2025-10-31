@@ -77,6 +77,7 @@ function getTable(config) {
 						const tbody = table.find("tbody");
 						let shift = 0;
 						let flag = false;
+						let current; // declared to avoid "no-undef" when assigning into event objects
 						const data = [];
 						for (let i = 0; i < tbody.find("tr").length; i++) {
 							if (tbody.find("tr").eq(i).find("td").eq(0).text() === "离开地影") { //Exits shadow
@@ -149,7 +150,7 @@ function getTable(config) {
 							return ele;
 						});
 					}
-					database = database.map((ele, index) => {
+					database = database.map((ele, _index) => {
 						if (isNaN(ele[property[6]][1])) {
 							ele[property[8]] = 0;
 							return ele;
